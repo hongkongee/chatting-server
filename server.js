@@ -28,8 +28,9 @@ io.sockets.on("connection", (socket) => {
   });
 
   socket.on("login", (data) => {
+    console.log("server gets a userName: ", data);
     clients.set(data, socket.id); // "나의 아이디", "소켓 고유의 아이디" pair을 Map에 insert
-    socket.broadcast.emit("sLogin", data); // 클라이언트로 아이디 보내기
+    io.sockets.emit("sLogin", data); // 클라이언트로 아이디 보내기
   });
   // 연결이 끊어짐
   socket.on("disconnect", () => {
