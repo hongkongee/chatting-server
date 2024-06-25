@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io'); // import { Server } from 'socket.io';
+const mysql = require('mysql2');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,49 +12,32 @@ const io = new Server('5000', {
   },
 });
 
-// // 접속한 사용자 아이디를 저장하기 위한 Map 객체 (임시 사용자 데이터베이스)
-// const clients = new Map();
+const dirtyWord = ['시발', '병신'];
 
-// // 클라이언트 연결 이벤트 처리
-// io.sockets.on('connection', (socket) => {
-//   console.log('user connected');
+const db = mysql.createConnection({
+  host: 'spring-database.c7ms48g6s76s.ap-northeast-2.rds.amazonaws.com',
+  user: 'root', // MySQL 사용자 이름
+  password: 'mysql123!!', // MySQL 비밀번호
+  database: 'issue', // 사용할 데이터베이스 이름
+});
 
-//   // 클라이언트로부터 메세지 받기 (message : data, id, target)
-//   socket.on('message', (res) => {
-//     const { target } = res; // 1:1 채팅 상대방 아이디
-
-//     const toUser = clients.get(target); // 아이디로 접속 유저 검색
-//     target
-//       ? io.sockets.to(toUser).emit('sMessage', res) // 존재하면 to()로 private 메세지 전송
-//       : socket.broadcast.emit('sMessage', res); // 존재하지 않으면 일반 broadcast로 메세지 전송
-
-//     // 클라이언트로 메세지 다시 보내기 (나를 제외한 모든 유저)
-//     // socket.broadcast.emit("sMessage", data);
-//   });
-
-//   socket.on('login', (data) => {
-//     console.log('server gets a userName: ', data);
-//     clients.set(data, socket.id); // "나의 아이디", "소켓 고유의 아이디" pair을 Map에 insert
-//     io.sockets.emit('sLogin', data); // 클라이언트로 아이디 보내기
-//   });
-
-//   // 연결이 끊어짐
-//   socket.on('disconnect', () => {
-//     console.log('user disconnected');
-//     for (let [userId, socketId] of clients.entries()) {
-//       if (socketId === socket.id) {
-//         clients.delete(userId);
-//         break;
-//       }
-//     }
-//   });
-// });
-
-// ============================ /room 네임스페이스 ============================
+db.connect((err) => {
+  if (err) {
+    console.error('MySQL 연결 오류:', err);
+    return;
+  }
+  console.log('MySQL에 연결되었습니다.');
+});
 
 // const roomClients = new Map(); -> map 타입
 // let roomClients = []; -> array 타입
 const connectedUsers = {}; // -> object 타입
+/* 
+{
+  EdA9QlRDxkRrPcSbAABe: { userId: 'ㅇㅀ', roomNumber: '1' },
+  'MqZZll_-m-iDVJZ1AACo': { userId: 'ㄹㄹㄹ', roomNumber: '1' }
+}
+*/
 
 // const chatNamespace = io.of('/room');
 io.sockets.on('connection', (socket) => {
@@ -61,52 +45,80 @@ io.sockets.on('connection', (socket) => {
 
   // 메세지 처리 (res : data, id, target)
   socket.on('message', (res) => {
-    console.log('message from chat namespace:', res);
-    const { target } = res; // 1:1 채팅 상대방 아이디
+    const { data, id, target } = res;
 
-    if (target) {
-      // 귓속말 기능이면
-      // const toUser = roomClients.get(target); // 아이디로 접속 유저 검색
-      const toUser = connectedUsers[target]; // 아이디로 접속 유저 검색
-      io.sockets.to(toUser).emit('sMessage', res); // 귓속말
-      return;
-    }
+    // 욕설을 필터링 하기
+    const filteredData = dirtyWord.reduce((acc, substring) => {
+      const regex = new RegExp(`(${substring})`, 'g'); // 각 substring 찾기
+      return acc.replace(regex, (match) => {
+        return match[0] + '*'.repeat(match.length - 1); // 첫글자를 제외하고 '*'로 가리기
+      });
+    }, data);
+    console.log('dirty word into ', filteredData);
+    const newRes = { data: filteredData, id, target };
 
+    const query =
+      'INSERT INTO messages (area_code, user_no, text) VALUES (?, ?, ?)';
+
+    console.log('res: ', res);
+    console.log('message from chat namespace:', newRes);
     // 내가 속한 방(들) 가져오기
     const myRooms = Array.from(socket.rooms);
-    /* 
-    myRooms: myRooms[0] 은 유저의 socket.id, myRooms[1]은 유저가 속한 첫번째 방 번호를 의미
-    그러므로 myRooms.length <= 1의 의미는 유저가 특정 방에 속해 있지 않음을 의미한다. -> 오픈채팅
-    */
-    if (myRooms.length > 1) {
-      socket.broadcast.in(myRooms[1]).emit('sMessage', res);
+
+    if (target !== '') {
+      // 귓속말 기능이면 (db에 저장하지 말자)
+      // const toUser = roomClients.get(target); // 아이디로 접속 유저 검색
+      const toUser = connectedUsers[target]; // 아이디로 접속 유저 검색
+      io.sockets.to(toUser).emit('sMessage', newRes); // 귓속말
       return;
+    } else {
+      console.log('같은 방에 전송!', myRooms);
+      if (myRooms.length > 1) {
+        console.log('같은 방에 전송! 방번호:', myRooms[1]);
+        socket.broadcast.in(myRooms[1]).emit('sMessage', newRes);
+        return;
+      }
+      socket.broadcast.emit('sMessage', newRes); // 모든 클라이언트에게 메시지 전송
+
+      // db에 저장하기
+      db.query(query, [myRooms[1], id, data], (err) => {
+        if (err) {
+          console.error('메시지 저장 오류:', err);
+          return;
+        }
+        console.log('메세지가 정상적으로 저장되었음');
+
+        /* 
+        myRooms: myRooms[0] 은 유저의 socket.id, myRooms[1]은 유저가 속한 첫번째 방 번호를 의미
+        그러므로 myRooms.length <= 1의 의미는 유저가 특정 방에 속해 있지 않음을 의미한다. -> 오픈채팅
+        */
+      });
     }
-    socket.broadcast.emit('sMessage', res);
   });
 
-  // 로그인 처리
+  // 로그인 처리 (채팅방 입장)
   socket.on('login', (data) => {
     console.log('server gets a userName: ', data);
     const { userId, roomNumber } = data;
     socket.join(roomNumber); // 접속한 사용자를 특정한 방에 배정
 
-    // 현재 접속중인 유저 목록
-    // roomClients.set(userId, socket.id); // "나의 아이디", "소켓 고유의 아이디" pair을 Map에 insert
-    // roomClients.push({
-    //   userId: userId,
-    //   socketId: socket.id,
-    //   roomNumber: roomNumber,
-    // });
+    // 채팅방 입장하면 이전 채팅 기록 조회
+    db.query('SELECT * FROM tbl_local_chat', (err, results) => {
+      if (err) {
+        console.error('쿼리 실행 오류:', err);
+        return;
+      }
+      console.log('쿼리 결과:', results);
+    });
 
     connectedUsers[socket.id] = { userId, roomNumber };
-    const usersInRoom = Object.values(connectedUsers)
+    const usersInRoom = Object.values(connectedUsers) // 클라이언트에 보낼 접속 유저 목록
       .filter((user) => user.roomNumber === roomNumber)
       .map((user) => user.userId);
     // console.log("data's userId : ", userId);
 
-    console.log('after inserting: ', usersInRoom);
-    io.emit('sLogin', userId); // 클라이언트로 아이디 보내기
+    console.log('after inserting: ', connectedUsers);
+    socket.broadcast.emit('sLogin', userId); // 클라이언트로 아이디 보내기
     io.to(roomNumber).emit('currentUsers', usersInRoom); // 클라이언트로 유저 목록 보내기
   });
 
