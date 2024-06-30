@@ -12,12 +12,12 @@ const io = new Server('5000', {
   },
 });
 
-const dirtyWord = ['시발', '병신'];
+// const dirtyWord = ['거지', '새끼'];
 
 const db = mysql.createConnection({
   host: 'spring-database.c7ms48g6s76s.ap-northeast-2.rds.amazonaws.com',
-  user: 'root', // MySQL 사용자 이름
-  password: 'mysql123!!', // MySQL 비밀번호
+  user: 'chat1', // MySQL 사용자 이름
+  password: '123456', // MySQL 비밀번호
   database: 'issue', // 사용할 데이터베이스 이름
 });
 
@@ -47,18 +47,19 @@ io.sockets.on('connection', (socket) => {
   socket.on('message', (res) => {
     const { data, id, target } = res;
 
+    /*
     // 욕설을 필터링 하기
     const filteredData = dirtyWord.reduce((acc, substring) => {
       const regex = new RegExp(`(${substring})`, 'g'); // 각 substring 찾기
       return acc.replace(regex, (match) => {
         return match[0] + '*'.repeat(match.length - 1); // 첫글자를 제외하고 '*'로 가리기
       });
-    }, data);
-    console.log('dirty word into ', filteredData);
-    const newRes = { data: filteredData, id, target };
+    }, data); 
+    console.log('dirty word into ', filteredData);*/
+    const newRes = { data, id, target };
 
     const query =
-      'INSERT INTO messages (area_code, user_no, text) VALUES (?, ?, ?)';
+      'INSERT INTO tbl_local_chat (room_no, nickname, text) VALUES (?, ?, ?)';
 
     console.log('res: ', res);
     console.log('message from chat namespace:', newRes);
@@ -76,23 +77,23 @@ io.sockets.on('connection', (socket) => {
       if (myRooms.length > 1) {
         console.log('같은 방에 전송! 방번호:', myRooms[1]);
         socket.broadcast.in(myRooms[1]).emit('sMessage', newRes);
+
+        // db에 저장하기
+        db.query(query, [myRooms[1], id, data], (err) => {
+          if (err) {
+            console.error('메시지 저장 오류:', err);
+            return;
+          }
+          console.log('메세지가 정상적으로 저장되었음');
+        });
         return;
       }
       socket.broadcast.emit('sMessage', newRes); // 모든 클라이언트에게 메시지 전송
 
-      // db에 저장하기
-      db.query(query, [myRooms[1], id, data], (err) => {
-        if (err) {
-          console.error('메시지 저장 오류:', err);
-          return;
-        }
-        console.log('메세지가 정상적으로 저장되었음');
-
-        /* 
+      /* 
         myRooms: myRooms[0] 은 유저의 socket.id, myRooms[1]은 유저가 속한 첫번째 방 번호를 의미
         그러므로 myRooms.length <= 1의 의미는 유저가 특정 방에 속해 있지 않음을 의미한다. -> 오픈채팅
         */
-      });
     }
   });
 
@@ -103,23 +104,31 @@ io.sockets.on('connection', (socket) => {
     socket.join(roomNumber); // 접속한 사용자를 특정한 방에 배정
 
     // 채팅방 입장하면 이전 채팅 기록 조회
-    db.query('SELECT * FROM tbl_local_chat', (err, results) => {
-      if (err) {
-        console.error('쿼리 실행 오류:', err);
-        return;
+    db.query(
+      'SELECT * FROM tbl_local_chat WHERE room_no = ?',
+      [roomNumber],
+      (err, results) => {
+        if (err) {
+          console.error('쿼리 실행 오류:', err);
+          return;
+        }
+        console.log('쿼리 결과:', results);
+
+        // 클라이언트(본인에게만)에 채팅 히스토리 전송
+        socket.emit('chatHistory', results);
+
+        connectedUsers[socket.id] = { userId, roomNumber };
+        const usersInRoom = Object.values(connectedUsers) // 클라이언트에 보낼 접속 유저 목록
+          .filter((user) => user.roomNumber === roomNumber)
+          .map((user) => user.userId);
+        // console.log("data's userId : ", userId);
+
+        console.log('after inserting: ', connectedUsers);
+        io.to(roomNumber).emit('sLogin', userId);
+        // socket.broadcast.emit('sLogin', userId); // 클라이언트로 아이디 보내기 (입장 메세지)
+        io.to(roomNumber).emit('currentUsers', usersInRoom); // 클라이언트로 유저 목록 보내기 (프로필)
       }
-      console.log('쿼리 결과:', results);
-    });
-
-    connectedUsers[socket.id] = { userId, roomNumber };
-    const usersInRoom = Object.values(connectedUsers) // 클라이언트에 보낼 접속 유저 목록
-      .filter((user) => user.roomNumber === roomNumber)
-      .map((user) => user.userId);
-    // console.log("data's userId : ", userId);
-
-    console.log('after inserting: ', connectedUsers);
-    socket.broadcast.emit('sLogin', userId); // 클라이언트로 아이디 보내기
-    io.to(roomNumber).emit('currentUsers', usersInRoom); // 클라이언트로 유저 목록 보내기
+    );
   });
 
   // 연결 해제 처리
