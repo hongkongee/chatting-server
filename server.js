@@ -39,6 +39,16 @@ const connectedUsers = {}; // -> object 타입
 }
 */
 
+// connectedUsers에서 유저의 닉네임으로 socket id를 찾는 함수 (users: connectedUsers)
+function findSocketIdByUserId(users, targetUserId) {
+  for (const [socketId, userInfo] of Object.entries(users)) {
+    if (userInfo.userId === targetUserId) {
+      return socketId;
+    }
+  }
+  return null; // 해당 userId를 가진 사용자가 없으면 null 반환
+}
+
 // const chatNamespace = io.of('/room');
 io.sockets.on('connection', (socket) => {
   console.log('a user connected to the chat namespace');
@@ -69,7 +79,8 @@ io.sockets.on('connection', (socket) => {
     if (target !== '') {
       // 귓속말 기능이면 (db에 저장하지 말자)
       // const toUser = roomClients.get(target); // 아이디로 접속 유저 검색
-      const toUser = connectedUsers[target]; // 아이디로 접속 유저 검색
+      const toUser = findSocketIdByUserId(connectedUsers, target); // 아이디로 접속 유저 검색
+      console.log('귓속말 상대:', toUser);
       io.sockets.to(toUser).emit('sMessage', newRes); // 귓속말
       return;
     } else {
