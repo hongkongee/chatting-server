@@ -144,6 +144,15 @@ io.sockets.on('connection', (socket) => {
 
   // 연결 해제 처리
   socket.on('disconnect', () => {
+    console.log('socket.id:', socket.id);
+    console.log(
+      'connectedUsers[socket.id].userId:',
+      connectedUsers[socket.id].userID
+    );
+    const myUserInfo = connectedUsers[socket.id];
+    const myUserId = myUserInfo['userId'];
+    socket.broadcast.emit('sExit', myUserId); // 클라이언트로 아이디 보내기 (입장 메세지)
+
     console.log('user disconnected from chat namespace');
     // 연결 해제 시 roomClients에서 자신의 아이디 제거
     // roomClients = roomClients.filter((client) => client.socketId !== socket.id);
@@ -151,3 +160,10 @@ io.sockets.on('connection', (socket) => {
     console.log('after removing: ', connectedUsers);
   });
 });
+
+/* 
+{
+  EdA9QlRDxkRrPcSbAABe: { userId: 'ㅇㅀ', roomNumber: '1' },
+  'MqZZll_-m-iDVJZ1AACo': { userId: 'ㄹㄹㄹ', roomNumber: '1' }
+}
+*/
