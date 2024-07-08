@@ -5,14 +5,12 @@ const mysql = require('mysql2');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server('5000', {
+const io = new Server(server, {
   cors: {
     // CORS 설정: 소켓 서버에 허락된 브라우저만 접근하도록 설정
     origin: '*',
   },
 });
-
-// const dirtyWord = ['거지', '새끼'];
 
 const db = mysql.createConnection({
   host: 'spring-database.c7ms48g6s76s.ap-northeast-2.rds.amazonaws.com',
@@ -69,7 +67,17 @@ io.sockets.on('connection', (socket) => {
     const newRes = { data, id, target };
 
     const query =
-      'INSERT INTO tbl_local_chat (room_no, nickname, text) VALUES (?, ?, ?)';
+      'INSERT INTO tbl_local_chat (room_no, nickname, text, write_date) VALUES (?, ?, ?, ?)';
+
+    // 한국 현재 시간 구하기 (2024-07-07-T17:48:52.772T 형태)
+    const now = new Date();
+    const utc = now.getTime() + now.getTimezoneOffset() * 60 * 1000;
+    const koreaTimeDiff = 9 * 60 * 60 * 1000;
+    const korNow = new Date(utc + koreaTimeDiff + koreaTimeDiff); // 왜 두 번 더해야 하지?
+
+    // 시간을 DB의 datetime(6) 타입에 맞게 바꾸기
+    const currentTime = korNow.toISOString().slice(0, 23).replace('T', ' ');
+    console.log('currentTime:', currentTime);
 
     console.log('res: ', res);
     console.log('message from chat namespace:', newRes);
@@ -90,7 +98,7 @@ io.sockets.on('connection', (socket) => {
         socket.broadcast.in(myRooms[1]).emit('sMessage', newRes);
 
         // db에 저장하기
-        db.query(query, [myRooms[1], id, data], (err) => {
+        db.query(query, [myRooms[1], id, data, currentTime], (err) => {
           if (err) {
             console.error('메시지 저장 오류:', err);
             return;
@@ -142,16 +150,15 @@ io.sockets.on('connection', (socket) => {
     );
   });
 
-  // 연결 해제 처리
+  // 연결 해제 처리 (퇴장 메세지)
   socket.on('disconnect', () => {
     console.log('socket.id:', socket.id);
-    console.log(
-      'connectedUsers[socket.id].userId:',
-      connectedUsers[socket.id].userID
-    );
+
     const myUserInfo = connectedUsers[socket.id];
-    const myUserId = myUserInfo['userId'];
-    socket.broadcast.emit('sExit', myUserId); // 클라이언트로 아이디 보내기 (입장 메세지)
+    if (myUserInfo) {
+      const myUserId = myUserInfo['userId'];
+      socket.broadcast.emit('sExit', myUserId); // 클라이언트로 아이디 보내기 (입장 메세지)
+    }
 
     console.log('user disconnected from chat namespace');
     // 연결 해제 시 roomClients에서 자신의 아이디 제거
@@ -167,3 +174,8 @@ io.sockets.on('connection', (socket) => {
   'MqZZll_-m-iDVJZ1AACo': { userId: 'ㄹㄹㄹ', roomNumber: '1' }
 }
 */
+
+const port = 5000;
+server.listen(port, () => {
+  console.log(`Server is running on http://localhost:${port}`);
+});
