@@ -1,10 +1,13 @@
 const express = require('express');
-const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io'); // import { Server } from 'socket.io';
 const mysql = require('mysql2');
 
 const app = express();
-const server = http.createServer(app);
+const server = https.createServer({
+  cert: fs.readFileSync('/path/to/cert.pem'),
+  key: fs.readFileSync('/path/to/key.pem'),
+});
 const io = new Server(server, {
   cors: {
     // CORS 설정: 소켓 서버에 허락된 브라우저만 접근하도록 설정
@@ -177,5 +180,7 @@ io.sockets.on('connection', (socket) => {
 
 const port = 5000;
 server.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(
+    `Socket.IO server is running on https://issuetrend.online:${port}`
+  );
 });
