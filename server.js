@@ -2,6 +2,7 @@ const express = require('express');
 const https = require('https');
 const { Server } = require('socket.io'); // import { Server } from 'socket.io';
 const mysql = require('mysql2');
+const fs = require('fs');
 
 const app = express();
 const server = https.createServer({
